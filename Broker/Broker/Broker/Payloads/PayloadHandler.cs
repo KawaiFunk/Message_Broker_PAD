@@ -1,5 +1,6 @@
 ﻿using System.Text;
 using Broker.Networking;
+using Broker.Payloads.Helpers;
 using Broker.Storage;
 using Newtonsoft.Json;
 
@@ -9,7 +10,6 @@ public static class PayloadHandler
 {
     public static void HandlePayload(byte[] payloadBytes, ConnectionInfo connectionInfo)
     {
-        // Validate input
         if (payloadBytes == null || payloadBytes.Length == 0)
         {
             Console.WriteLine("Received empty payload");
@@ -25,8 +25,13 @@ public static class PayloadHandler
         }
 
         Console.WriteLine($"Received payload: {payloadString}");
+        
+        if (payloadString.Equals("SWITCHTYPE", StringComparison.OrdinalIgnoreCase))
+        {
+            MessageFormatManager.SwitchFormat();
+            Console.WriteLine($"Switched message format to: {MessageFormatManager.CurrentFormat}");
+        }
 
-        // Handle subscription messages
         if (payloadString.StartsWith("SUBSCRIBE:", StringComparison.OrdinalIgnoreCase))
         {
             var topic = payloadString.Substring("SUBSCRIBE:".Length).Trim();
@@ -43,10 +48,10 @@ public static class PayloadHandler
         }
         else
         {
-            // Handle JSON messages
             try
             {
-                var payload = JsonConvert.DeserializeObject<Payload>(payloadString);
+                var currentFormat = MessageFormatManager.CurrentFormat;
+                var payload = PayloadSerializer.Deserialize(payloadString, currentFormat);
                 
                 if (payload == null)
                 {

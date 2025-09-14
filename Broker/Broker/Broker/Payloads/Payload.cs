@@ -1,7 +1,13 @@
-﻿namespace Broker.Payloads;
+﻿using System.Xml.Serialization;
 
+namespace Broker.Payloads;
+
+[XmlRoot("Payload")]
 public class Payload
 {
-    public string Topic   { get; set; } = string.Empty;
+    [XmlElement("Topic")]
+    public string Topic { get; set; } = string.Empty;
+
+    [XmlElement("Message")]
     public string Message { get; set; } = string.Empty;
 }
