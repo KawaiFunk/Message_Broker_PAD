@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using Broker.Payloads;
 using Broker.Storage;
 
@@ -16,6 +17,9 @@ public class BrokerSocket
     {
         _socket.Bind(new IPEndPoint(IPAddress.Parse(ipAddress), port));
         _socket.Listen(Constants.ConnectionQueueSize);
+        
+        var worker = new Worker();
+        _ = Task.Run(() => worker.DoSendMessageWork());
 
         Console.WriteLine($"Broker started on {ipAddress}:{port}");
         AcceptConnection();
@@ -64,97 +68,78 @@ public class BrokerSocket
     }
 
     private void RecievedCallback(IAsyncResult result)
+{
+    var connection = result.AsyncState as ConnectionInfo;
+    if (connection?.Socket == null) return;
+
+    var clientAddress = connection.Address;
+
+    try
     {
-        var connection = result.AsyncState as ConnectionInfo;
-        if (connection?.Socket == null) return;
+        var socket = connection.Socket;
 
-        var  clientAddress           = connection.Address;
-        bool shouldContinueReceiving = true;
-
-        try
+        if (!socket.Connected)
         {
-            var socket = connection.Socket;
-            
-            if (!socket.Connected)
-            {
-                Console.WriteLine($"Client already disconnected: {clientAddress}");
-                CleanupConnection(connection, clientAddress);
-                return;
-            }
-
-            SocketError response;
-            var         bufferSize = socket.EndReceive(result, out response);
-
-            if (response != SocketError.Success || bufferSize == 0)
-            {
-                Console.WriteLine($"Client disconnected: {clientAddress}");
-                CleanupConnection(connection, clientAddress);
-                return;
-            }
-
-            var payload = new byte[bufferSize];
-            Array.Copy(connection.Buffer, payload, bufferSize);
-
-            PayloadHandler.HandlePayload(payload, connection);
-        }
-        catch (ObjectDisposedException)
-        {
-            Console.WriteLine($"Socket already disposed for client: {clientAddress}");
-            shouldContinueReceiving = false;
-        }
-        catch (SocketException ex)
-        {
-            Console.WriteLine($"Socket error for client {clientAddress}: {ex.Message}");
-            shouldContinueReceiving = false;
-        }
-        catch (Exception e)
-        {
-            Console.WriteLine($"Failed to receive data from {clientAddress}: {e.Message}");
-            shouldContinueReceiving = false;
-        }
-
-        if (shouldContinueReceiving && connection.Socket != null)
-        {
-            try
-            {
-                if (connection.Socket.Connected && !connection.Socket.Poll(0, SelectMode.SelectRead))
-                {
-                    connection.Socket.BeginReceive(
-                        connection.Buffer,
-                        0,
-                        Constants.BufferSize,
-                        SocketFlags.None,
-                        RecievedCallback,
-                        connection
-                    );
-                }
-                else
-                {
-                    Console.WriteLine($"Socket not ready for receiving, disconnecting: {clientAddress}");
-                    CleanupConnection(connection, clientAddress);
-                }
-            }
-            catch (ObjectDisposedException)
-            {
-                Console.WriteLine($"Socket disposed while trying to continue receiving: {clientAddress}");
-                ConnectionsStorage.RemoveConnection(clientAddress);
-            }
-            catch (SocketException ex)
-            {
-                Console.WriteLine($"Failed to continue receiving from {clientAddress}: {ex.Message}");
-                CleanupConnection(connection, clientAddress);
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine($"Unexpected error continuing receive for {clientAddress}: {e.Message}");
-                CleanupConnection(connection, clientAddress);
-            }
-        }
-        else if (connection.Socket != null)
-        {
+            Console.WriteLine($"Client already disconnected: {clientAddress}");
             CleanupConnection(connection, clientAddress);
+            return;
         }
+
+        SocketError response;
+        int bufferSize = socket.EndReceive(result, out response);
+
+        if (response != SocketError.Success || bufferSize == 0)
+        {
+            Console.WriteLine($"Client disconnected: {clientAddress}");
+            CleanupConnection(connection, clientAddress);
+            return;
+        }
+
+        string chunk = Encoding.UTF8.GetString(connection.Buffer, 0, bufferSize);
+        string aggregate = connection.Pending + chunk;
+
+        int start = 0;
+        while (true)
+        {
+            int newline = aggregate.IndexOf('\n', start);
+            if (newline < 0) break; 
+
+            string line = aggregate.Substring(start, newline - start).TrimEnd('\r');
+            if (!string.IsNullOrWhiteSpace(line))
+            {
+                PayloadHandler.HandlePayload(Encoding.UTF8.GetBytes(line), connection);
+            }
+            start = newline + 1;
+        }
+
+        connection.Pending = aggregate.Substring(start);
+
+        socket.BeginReceive(
+            connection.Buffer,
+            0,
+            Constants.BufferSize,
+            SocketFlags.None,
+            RecievedCallback,
+            connection
+        );
     }
+    catch (ObjectDisposedException)
+    {
+        Console.WriteLine($"Socket already disposed for client: {clientAddress}");
+        ConnectionsStorage.RemoveConnection(clientAddress);
+    }
+    catch (SocketException ex)
+    {
+        Console.WriteLine($"Socket error for client {clientAddress}: {ex.Message}");
+        CleanupConnection(connection, clientAddress);
+    }
+    catch (Exception e)
+    {
+        Console.WriteLine($"Failed to receive data from {clientAddress}: {e.Message}");
+        CleanupConnection(connection, clientAddress);
+    }
+}
+
 
     private void CleanupConnection(ConnectionInfo connection, string clientAddress)
     {

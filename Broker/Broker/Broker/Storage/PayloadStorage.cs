@@ -5,29 +5,13 @@ namespace Broker.Storage;
 
 public static class PayloadStorage
 {
-    private static ConcurrentQueue<Payload> _payloadsQueue;
+    private static readonly BlockingCollection<Payload> _queue =
+        new(new ConcurrentQueue<Payload>());
 
-    static PayloadStorage()
-    {
-        _payloadsQueue = new  ConcurrentQueue<Payload>();
-    }
+    public static void AddPayload(Payload payload) => _queue.Add(payload);
 
-    public static void AddPayload(Payload payload)
-    {
-        _payloadsQueue.Enqueue(payload);
-    }
-    
-    public static Payload GetNextPayload()
-    {
-        Payload payload = null;
-        _payloadsQueue.TryDequeue(out payload);
-        return payload;
-    }
-    
-    public static bool IsEmpty()
-    {
-        return _payloadsQueue.IsEmpty;
-    }
-    
+    public static IEnumerable<Payload> GetConsumingEnumerable() => _queue.GetConsumingEnumerable();
+
+    public static void Complete() => _queue.CompleteAdding();
     
 }
