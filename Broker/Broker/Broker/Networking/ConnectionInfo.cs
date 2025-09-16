@@ -1,5 +1,4 @@
-﻿// ConnectionInfo.cs
-using System.Net.Sockets;
+﻿using System.Net.Sockets;
 using Broker.Payloads.Enums;
 
 namespace Broker.Networking;
@@ -11,11 +10,10 @@ public class ConnectionInfo
     public string Address { get; set; }
     public string Topic   { get; set; }
 
-    // Default JSON unless client says otherwise
     public MessageFormat Format { get; set; } = MessageFormat.Json;
+    public string Pending  { get; set; } = string.Empty;
 
-    // NEW: carry partial data between BeginReceive calls
-    public string Pending { get; set; } = string.Empty;
+    public object SendLock { get; }  = new();
 
     public ConnectionInfo()
     {
