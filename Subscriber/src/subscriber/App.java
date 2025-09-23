@@ -4,9 +4,6 @@ import subscriber.handler.PrintingMessageHandler;
 import subscriber.net.SubscriberClient;
 
 public class App {
-   public App() {
-   }
-
    public static void main(String[] var0) {
       CliOptions var1 = CliOptions.parse(var0);
       if (var1 != null) {
